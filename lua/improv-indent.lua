@@ -254,7 +254,15 @@ function M.setup(opts)
         -- 3. Original TextChangedI alignment logic (for typing dot or brackets)
         local should_align = false
         if line:match("^%s*%&?%.") then
-          should_align = true
+          -- Guard: only realign when the cursor is past the dot (user just typed it).
+          -- If cursor is AT the dot position, the user deleted a prefix to expose the dot
+          -- (e.g. removed 'cupping_session_samples' from 'cupping_session_samples.joins(...)')
+          -- — the existing indent is already correct, don't touch it.
+          local cursor_col   = vim.api.nvim_win_get_cursor(0)[2]
+          local indent_cols  = vim.fn.indent(lnum)
+          if cursor_col > indent_cols then
+            should_align = true
+          end
         elseif not vim.g.vscode and line:match("^%s*[)}%]]") then
           should_align = true
         end
