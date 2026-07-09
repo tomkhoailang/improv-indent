@@ -16,6 +16,11 @@ function M.setup(opts)
     vim.g.align_dot_chains = opts.align_dot_chains
   end
 
+  -- Set up auto-closing pairs (autopair)
+  if opts.autopair ~= false then
+    require("improv-indent.autopair").setup(opts.autopair_opts)
+  end
+
   local function apply_custom_indent(bufnr)
     local ft = vim.bo[bufnr].filetype
     if rules.rules[ft] and rules.rules[ft].enabled then
