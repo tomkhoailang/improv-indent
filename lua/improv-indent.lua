@@ -145,25 +145,6 @@ function M.setup(opts)
                           end, delay)
                         end
                       end
-                    else
-                      -- Terminal Neovim: ONLY run if we moved a trailing dot!
-                      if moved_trailing_dot then
-                        local spaces = string.rep(" ", new_indent)
-                        vim.api.nvim_buf_set_text(buf, target_row, 0, target_row, current_indent, { spaces .. line })
-
-                        local win = vim.api.nvim_get_current_win()
-                        -- Record the split time and target position to override delayed cursor syncs
-                        local uv = vim.uv or vim.loop
-                        vim.b[buf].last_split_time = uv.hrtime()
-                        vim.b[buf].target_cursor_col = target_col
-                        vim.b[buf].target_cursor_lnum = lnum
-
-                        vim.defer_fn(function()
-                          if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_win_is_valid(win) then
-                            pcall(vim.api.nvim_win_set_cursor, win, { lnum, target_col })
-                          end
-                        end, 20)
-                      end
                     end
                   end
                 end
@@ -188,7 +169,9 @@ function M.setup(opts)
       end
       vim.bo[bufnr].indentexpr = "v:lua.GetCustomIndent()"
 
-      setup_buf_listener(bufnr)
+      if vim.g.vscode then
+        setup_buf_listener(bufnr)
+      end
     end
   end
 
@@ -206,7 +189,7 @@ function M.setup(opts)
     end
   end
 
-  -- Register TextChangedI to handle closing brackets and dot-chain alignments automatically
+  -- Register TextChangedI to handle closing brackets, dot-chain alignments, and splits automatically
   vim.api.nvim_create_autocmd("TextChangedI", {
     callback = function()
       local bufnr = vim.api.nvim_get_current_buf()
@@ -215,6 +198,41 @@ function M.setup(opts)
         local lnum = vim.api.nvim_win_get_cursor(0)[1]
         local line = vim.api.nvim_get_current_line()
 
+        -- 1. Check for trailing dot split in terminal Neovim
+        if not vim.g.vscode and lnum > 1 and line:match("^%s*$") then
+          local pline = vim.fn.getline(lnum - 1)
+          if pline:match("%.$") then
+            local stripped_prev = pline:sub(1, -2)
+            local engine = require("indent_engine")
+            local dot_idx = engine.find_first_dot_index(stripped_prev, ft)
+            if not dot_idx and lnum > 2 then
+              local line_above = vim.fn.getline(lnum - 2)
+              if line_above and line_above:match("^%s*%&?%.") then
+                dot_idx = engine.find_first_dot_index(line_above, ft)
+              end
+            end
+
+            if dot_idx then
+              local new_indent = dot_idx - 1
+              local spaces = string.rep(" ", new_indent)
+              vim.api.nvim_buf_set_lines(bufnr, lnum - 2, lnum - 1, true, { stripped_prev })
+              vim.api.nvim_set_current_line(spaces .. ".")
+              pcall(vim.api.nvim_win_set_cursor, 0, { lnum, new_indent + 1 })
+              return
+            end
+          end
+        end
+
+        -- 2. Check for before-dot split cursor adjustment in terminal Neovim
+        if not vim.g.vscode and line:match("^%s*%&?%.") then
+          local cursor = vim.api.nvim_win_get_cursor(0)
+          local current_indent = vim.fn.indent(lnum)
+          if cursor[2] == current_indent then
+            pcall(vim.api.nvim_win_set_cursor, 0, { lnum, current_indent + 1 })
+          end
+        end
+
+        -- 3. Original TextChangedI alignment logic (for typing dot or brackets)
         local should_align = false
         if line:match("^%s*%&?%.") then
           should_align = true
