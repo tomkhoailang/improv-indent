@@ -144,6 +144,14 @@ require("improv-indent").setup({
 - **Smart Delete:** Pressing `<BS>` inside empty brackets (e.g. `(|)`) deletes both the opening and closing brackets.
 - **Visual Selection Wrapping:** Selecting text in Visual mode and typing an opening character wraps the selection in the corresponding pair.
 
+> [!TIP]
+> **Lowering Matching Bracket Timeout:** 
+> When typing a closing bracket, Neovim's built-in `showmatch` option briefly jumps the cursor to the matching opener, pausing for the duration specified by `matchtime` (which defaults to `5` tenths of a second, or 500ms). To make this experience feel snappy and responsive, you can lower the pause duration to 100ms in your configuration:
+> ```lua
+> vim.opt.showmatch = true
+> vim.opt.matchtime = 1 -- Pause for only 100ms
+> ```
+
 ### Disabling Treesitter Indentation Conflicts
 
 Since `nvim-treesitter`'s experimental indentation engine often overrides `indentexpr`, it is recommended to disable it for any languages where you enable `improv-indent`:
