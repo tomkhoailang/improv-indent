@@ -22,28 +22,6 @@ function M.setup(opts)
     end
     vim.b[bufnr].improv_indent_attached = true
 
-    -- Register CursorMovedI to lock cursor in place after a line split
-    vim.api.nvim_create_autocmd("CursorMovedI", {
-      buffer = bufnr,
-      callback = function()
-        local last_time = vim.b[bufnr].last_split_time
-        if last_time then
-          local uv = vim.uv or vim.loop
-          local delta = (uv.hrtime() - last_time) / 1e9
-          if delta < 0.25 then
-            local cursor = vim.api.nvim_win_get_cursor(0)
-            local target_lnum = vim.b[bufnr].target_cursor_lnum
-            local target_col = vim.b[bufnr].target_cursor_col
-            if cursor[1] == target_lnum and cursor[2] < target_col then
-              pcall(vim.api.nvim_win_set_cursor, 0, { target_lnum, target_col })
-            end
-          else
-            vim.b[bufnr].last_split_time = nil
-          end
-        end
-      end,
-    })
-
     vim.api.nvim_buf_attach(bufnr, false, {
       on_bytes = function(
         _, buf, _, start_row, _, _, old_row, _, _, new_row, _, _
@@ -84,8 +62,27 @@ function M.setup(opts)
 
               if line then
                 local should_align = false
-                if new_row > 0 and (line:match("^%s*%&?%.") or moved_trailing_dot) then
-                  should_align = true
+                local is_empty = line:match("^%s*$") ~= nil
+                if new_row > 0 then
+                  if line:match("^%s*%&?%.") or moved_trailing_dot then
+                    should_align = true
+                  elseif is_empty then
+                    -- Lookahead: check if the line below starts with a dot
+                    local nlnum = vim.fn.nextnonblank(target_row + 1)
+                    if nlnum > 0 then
+                      local nline = vim.fn.getline(nlnum)
+                      if nline:match("^%s*%&?%.") then
+                        should_align = true
+                      end
+                    end
+                    -- Lookabove: check if the line above starts with a dot
+                    if not should_align and start_row > 0 then
+                      local pline = vim.api.nvim_buf_get_lines(buf, start_row, start_row + 1, true)[1]
+                      if pline and pline:match("^%s*%&?%.") then
+                        should_align = true
+                      end
+                    end
+                  end
                 elseif new_row == 0 and line:match("^%s*%.$") then
                   should_align = true
                 end
@@ -93,40 +90,79 @@ function M.setup(opts)
                 if should_align then
                   local lnum = target_row + 1
                   local cursor_lnum = vim.api.nvim_win_get_cursor(0)[1]
+                  local is_valid = false
                   if cursor_lnum == lnum then
+                    is_valid = true
+                  elseif cursor_lnum == lnum - 1 then
+                    local pline = vim.api.nvim_buf_get_lines(buf, lnum - 2, lnum - 1, true)[1]
+                    if pline and not pline:match("^%s*$") then
+                      is_valid = true
+                    end
+                  end
+
+                  if is_valid then
+                    if is_empty then
+                      -- Manual lookup for dot-chain indent on empty lines (only for VS Code)
+                      if vim.g.vscode then
+                        local nlnum = vim.fn.nextnonblank(target_row + 1)
+                        if nlnum > 0 then
+                          local nline = vim.fn.getline(nlnum)
+                          if nline:match("^%s*%&?%.") then
+                            new_indent = vim.fn.indent(nlnum)
+                          end
+                        end
+                        if not new_indent and start_row > 0 then
+                          local pline = vim.api.nvim_buf_get_lines(buf, start_row, start_row + 1, true)[1]
+                          if pline and pline:match("^%s*%&?%.") then
+                            new_indent = vim.fn.indent(start_row + 1)
+                          end
+                        end
+                      end
+                    end
+
                     new_indent = new_indent or require("indent_engine").get_indent(ft, lnum)
                     local current_indent = vim.fn.indent(lnum)
                     local target_col = new_indent + 1
 
-                    if new_indent ~= current_indent or moved_trailing_dot then
-                      local spaces = string.rep(" ", new_indent)
-                      vim.api.nvim_buf_set_text(buf, target_row, 0, target_row, current_indent, { spaces .. line })
-                    end
-                      
-                    local win = vim.api.nvim_get_current_win()
                     if vim.g.vscode then
+                      if new_indent ~= current_indent or moved_trailing_dot then
+                        local spaces = string.rep(" ", new_indent)
+                        vim.api.nvim_buf_set_text(buf, target_row, 0, target_row, current_indent, { spaces .. line })
+                      end
+                      
                       if new_row > 0 then
                         for _, delay in ipairs({ 10, 30, 60, 100 }) do
                           vim.defer_fn(function()
                             if vim.api.nvim_buf_is_valid(buf) then
-                              vim.fn.VSCodeNotify('cursorMove', { to = 'wrappedLineFirstNonWhitespaceCharacter' })
-                              vim.fn.VSCodeNotify('cursorMove', { to = 'right', by = 'character', value = 1 })
+                              if line:match("^%s*$") then
+                                vim.fn.VSCodeNotify('cursorMove', { to = 'right', by = 'character', value = new_indent })
+                              else
+                                vim.fn.VSCodeNotify('cursorMove', { to = 'wrappedLineFirstNonWhitespaceCharacter' })
+                                vim.fn.VSCodeNotify('cursorMove', { to = 'right', by = 'character', value = 1 })
+                              end
                             end
                           end, delay)
                         end
                       end
                     else
-                      -- Record the split time and target position to override delayed cursor syncs
-                      local uv = vim.uv or vim.loop
-                      vim.b[buf].last_split_time = uv.hrtime()
-                      vim.b[buf].target_cursor_col = target_col
-                      vim.b[buf].target_cursor_lnum = lnum
+                      -- Terminal Neovim: ONLY run if we moved a trailing dot!
+                      if moved_trailing_dot then
+                        local spaces = string.rep(" ", new_indent)
+                        vim.api.nvim_buf_set_text(buf, target_row, 0, target_row, current_indent, { spaces .. line })
 
-                      vim.defer_fn(function()
-                        if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_win_is_valid(win) then
-                          pcall(vim.api.nvim_win_set_cursor, win, { lnum, target_col })
-                        end
-                      end, 20)
+                        local win = vim.api.nvim_get_current_win()
+                        -- Record the split time and target position to override delayed cursor syncs
+                        local uv = vim.uv or vim.loop
+                        vim.b[buf].last_split_time = uv.hrtime()
+                        vim.b[buf].target_cursor_col = target_col
+                        vim.b[buf].target_cursor_lnum = lnum
+
+                        vim.defer_fn(function()
+                          if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_win_is_valid(win) then
+                            pcall(vim.api.nvim_win_set_cursor, win, { lnum, target_col })
+                          end
+                        end, 20)
+                      end
                     end
                   end
                 end
