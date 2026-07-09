@@ -127,7 +127,8 @@ function M.setup(opts)
                     if vim.g.vscode then
                       if new_indent ~= current_indent or moved_trailing_dot then
                         local spaces = string.rep(" ", new_indent)
-                        vim.api.nvim_buf_set_text(buf, target_row, 0, target_row, current_indent, { spaces .. line })
+                        local replacement = moved_trailing_dot and (spaces .. line) or spaces
+                        vim.api.nvim_buf_set_text(buf, target_row, 0, target_row, current_indent, { replacement })
                       end
                       
                       if new_row > 0 then
@@ -135,7 +136,7 @@ function M.setup(opts)
                           vim.defer_fn(function()
                             if vim.api.nvim_buf_is_valid(buf) then
                               if line:match("^%s*$") then
-                                vim.fn.VSCodeNotify('cursorMove', { to = 'right', by = 'character', value = new_indent })
+                                vim.fn.VSCodeNotify('cursorMove', { to = 'wrappedLineEnd' })
                               else
                                 vim.fn.VSCodeNotify('cursorMove', { to = 'wrappedLineFirstNonWhitespaceCharacter' })
                                 vim.fn.VSCodeNotify('cursorMove', { to = 'right', by = 'character', value = 1 })
