@@ -31,45 +31,49 @@ To replicate VS Code's indentation behavior within Neovim, the engine performs t
 
 ## Examples & Usecases
 
-Here are some real-world usecases and code formatting patterns handled dynamically by `improv-indent`:
+Here are some real-world usecases showing how the **indentation level** behaves when typing or pressing Enter:
 
 ### 1. Ruby/JavaScript Multiline Dot Chains
-Traditional auto-indenters snap dot operators back to standard block indent levels (e.g., 2 or 4 spaces). `improv-indent` detects dot chains and automatically inherits the exact column position of the first dot operator of the parent line:
-```ruby
-# Snaps dot chains to align with the first dot operator on the parent line:
-counts_map = MasterSamples.cupping_session_samples
-                          .joins(:score)
-                          .where(active: true)
-```
+* **Before:** Default auto-indenters snap dot operators back to column 0 or standard block levels, losing visual alignment:
+  ```ruby
+  counts_map = MasterSamples.cupping_session_samples
+  # Hit Enter and type '.joins':
+  .joins(:score) # <- Snapped to column 0 or standard indent
+  ```
+* **After:** `improv-indent` automatically detects the chain and aligns the dot precisely with the first dot of the parent line:
+  ```ruby
+  counts_map = MasterSamples.cupping_session_samples
+                            .joins(:score) # <- Snapped to align perfectly with the first dot
+  ```
 
-### 2. Ruby Keyword Blocks
-Correctly parses and indents keyword-delimited blocks without using Treesitter or legacy Vimscript helpers:
-```ruby
-def my_method
-  if condition
-    do_something
-  end
-end
-```
+### 2. Unmatched Delimiter Indent (All Languages)
+* **Before:** Hitting Enter after an unclosed delimiter might fail to indent the next line:
+  ```rust
+  let x = my_function(
+  # Hit Enter: cursor is placed at column 0 without indent
+  ```
+* **After:** The engine tracks unmatched opening delimiters (`{`, `(`, `[`) to automatically indent the next line:
+  ```rust
+  let x = my_function(
+      # Automatically indents by +4 spaces (shiftwidth) on Enter
+  ```
 
-### 3. Delimiter Depth Tracking & Multi-line Arguments (Rust/Java/C#/C++)
-Automatically tracks unmatched open delimiters (`{`, `(`, `[`) at the end of lines to indent subsequent continuation parameters:
-```rust
-let x = my_function(
-    param_one,
-    param_two
-);
-```
-
-### 4. Precise Closing Bracket Alignment (All Languages)
-Typing a closing delimiter (`}`, `)`, `]`) as the first non-whitespace character on a line queries the syntax tree, ignores comments/strings, and instantly snaps the delimiter to align 1-to-1 with the line containing its matching opener:
-```rust
-fn main() {
-    if condition {
-        do_something();
-    } // <- aligns exactly with the 'if' line
-}   // <- aligns exactly with the 'fn' line
-```
+### 3. Closing Bracket Snapping & Alignment (All Languages)
+* **Before:** Typing a closing bracket on a new line might remain at the current block level or snap to the wrong column:
+  ```rust
+  fn main() {
+      if condition {
+          do_something();
+          } -- Typing '}' stays at column 8
+  ```
+* **After:** Typing a closing bracket instantly queries the buffer, finds the matching opener line, and aligns the closing bracket line with it:
+  ```rust
+  fn main() {
+      if condition {
+          do_something();
+      } -- Snaps to column 4 to align with the 'if' line
+  } -- Snaps to column 0 to align with the 'fn' line
+  ```
 
 ---
 
