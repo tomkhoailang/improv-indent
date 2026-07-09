@@ -169,6 +169,18 @@ function M.setup(opts)
       end
       vim.bo[bufnr].indentexpr = "v:lua.GetCustomIndent()"
 
+      -- Prevent "." from triggering indentexpr on the current line.
+      -- Ruby's runtime indent file adds "." to indentkeys, which re-indents
+      -- the entire line whenever "." is typed (even mid-line), causing it to
+      -- snap to the wrong indent level. Remove it; dot-chain alignment is
+      -- handled by TextChangedI instead.
+      vim.schedule(function()
+        if vim.api.nvim_buf_is_valid(bufnr) then
+          vim.api.nvim_buf_call(bufnr, function()
+            vim.cmd "silent! setlocal indentkeys-=."
+          end)
+        end
+      end)
       if vim.g.vscode then
         setup_buf_listener(bufnr)
       end
