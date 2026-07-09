@@ -240,7 +240,14 @@ function M.setup(opts)
           local cursor = vim.api.nvim_win_get_cursor(0)
           local current_indent = vim.fn.indent(lnum)
           if cursor[2] == current_indent then
-            pcall(vim.api.nvim_win_set_cursor, 0, { lnum, current_indent + 1 })
+            -- Only jump past the dot when nothing follows it.
+            -- If content exists after the dot (e.g. ".joins(:scores)"), the user
+            -- just deleted a prefix (like `cupping_session_samples`) and the cursor
+            -- arrived at the dot position via backspace — do NOT push it forward.
+            local after_dot = line:match("^%s*%&?%.(.*)")
+            if after_dot and after_dot:match("^%s*$") then
+              pcall(vim.api.nvim_win_set_cursor, 0, { lnum, current_indent + 1 })
+            end
           end
         end
 
