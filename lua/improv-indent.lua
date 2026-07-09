@@ -69,10 +69,16 @@ function M.setup(opts)
           if new_indent ~= current_indent then
             local line_without_indent = line:match("^%s*(.*)")
             local spaces = string.rep(" ", new_indent)
-            vim.api.nvim_set_current_line(spaces .. line_without_indent)
             local cursor = vim.api.nvim_win_get_cursor(0)
-            local diff = new_indent - current_indent
-            pcall(vim.api.nvim_win_set_cursor, 0, { cursor[1], math.max(0, cursor[2] + diff) })
+            local line_len = #line
+            local col_from_end = line_len - cursor[2]
+
+            local new_line = spaces .. line_without_indent
+            vim.api.nvim_set_current_line(new_line)
+
+            local new_line_len = #new_line
+            local new_col = math.max(0, new_line_len - col_from_end)
+            pcall(vim.api.nvim_win_set_cursor, 0, { cursor[1], new_col })
           end
         end
       end

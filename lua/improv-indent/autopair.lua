@@ -6,7 +6,7 @@ local del_bs = vim.api.nvim_replace_termcodes("<Del><BS>", true, false, true)
 local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
 local cr_expand = vim.api.nvim_replace_termcodes("<CR><Esc>O", true, false, true)
 
-local pairs = {
+local pair_definitions = {
   ["("] = ")",
   ["["] = "]",
   ["{"] = "}",
@@ -37,7 +37,7 @@ end
 
 function M.handle_open(open_char)
   local char_before, char_after = M.get_cursor_context()
-  local close_char = pairs[open_char]
+  local close_char = pair_definitions[open_char]
 
   -- Quote-specific checks
   if open_char == '"' or open_char == "'" or open_char == "`" then
@@ -69,7 +69,7 @@ end
 
 function M.handle_backspace()
   local char_before, char_after = M.get_cursor_context()
-  if pairs[char_before] == char_after then
+  if pair_definitions[char_before] == char_after then
     return del_bs
   end
   return vim.api.nvim_replace_termcodes("<BS>", true, false, true)
@@ -135,7 +135,7 @@ function M.setup(opts)
   end
 
   -- Map opening/closing pairs in Insert mode
-  for open_char, close_char in pairs(pairs) do
+  for open_char, close_char in pairs(pair_definitions) do
     if open_char ~= close_char then
       map_insert(open_char, function()
         return M.handle_open(open_char)
