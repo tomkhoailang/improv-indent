@@ -20,6 +20,7 @@ To replicate VS Code's indentation behavior within Neovim, the engine performs t
 2. **VS Code-Parity Regex Evaluation:** If a language defines `increaseIndentPattern` or `decreaseIndentPattern` in `indent_rules.lua` (which are translated from VS Code's configurations), we compile and evaluate them. If a language doesn't have regex rules (like C#, Java, C++), the engine automatically falls back to token-based bracket tracking.
 3. **Optimized Bracket Alignment (`searchpairpos`):** Instead of just doing a naive `base_indent - shiftwidth` when a closing bracket (`}`, `)`, `]`) is typed, the engine uses Neovim's built-in, C-optimized `searchpairpos()` to search backwards and locate the exact opening bracket. It queries Neovim's syntax highlighting tree (`synIDattr`) to ignore matches inside comments and strings. Once the exact opener line is found, we match its indentation level 1-to-1, replicating VS Code's `electricCharacter.ts` matching bracket alignment.
 4. **Smart Dot Chain Alignment:** When splitting a line or typing a dot (`.`), if `align_dot_chains` is enabled, the engine scans the previous line, finds the first method call dot operator (excluding comments, strings, and numbers like `1.5`), and aligns the dot precisely.
+5. **VS Code-Parity Autopairs:** When typing opening characters (`(`, `[`, `{`, `"`, `'`, `` ` ``), the engine evaluates word boundaries and character whitelists modeled after VS Code's `characterPair.ts` heuristics. If matched, it auto-closes the pair. It also handles overtyping, backspace deletion, Enter-key expansion, and visual selection wrapping natively.
 
 ## Features
 
@@ -28,6 +29,7 @@ To replicate VS Code's indentation behavior within Neovim, the engine performs t
 - **Rider/JetBrains-style Dot Chain Alignment:** Automatically aligns multiline dot chains to the first dot operator of the parent line, avoiding snapping back to column 0 or standard indent shifts.
 - **Fully Automated Hooking:** Automatically disables native Vim indenter files and takes over the buffer's `indentexpr` for any language marked as `enabled = true`.
 - **Session-Restore Support:** Automatically restores custom indentation settings after loading user sessions (`SessionLoadPost`).
+- **VS Code-Parity Autopairs:** Implements smart auto-closing pair heuristics, quote word-boundary checks, overtyping (skip closing character), backspace pair deletion, and visual selection wrapping.
 
 ## Examples & Usecases
 
@@ -117,6 +119,30 @@ require("improv-indent").setup({
   }
 })
 ```
+
+### VS Code-style Autopair (Branch: `autopair`)
+
+If you are on the `autopair` branch, `improv-indent` ships with a complete standalone, VS Code-parity autopair implementation. It can be customized or disabled via the `autopair_opts` table in the setup call:
+
+```lua
+require("improv-indent").setup({
+  align_dot_chains = true,
+  -- Autopair options (optional)
+  autopair = true, -- Set to false to disable the autopair engine completely
+  autopair_opts = {
+    -- Set to false if you want to manage CR/BS mappings in your own mapping chain
+    map_cr = true, 
+    map_bs = true,
+  }
+})
+```
+
+**Heuristics implemented:**
+- **Opening Pair Auto-closing:** Opening brackets auto-close only when typed before spaces, closing brackets, or punctuation.
+- **Quote Word-Boundary Check:** Quotes do not auto-close when typed immediately after a word character (e.g. typing `'` in `don't` will not insert a closing quote).
+- **Overtyping:** Typing a closing character moves the cursor past the existing character instead of inserting a duplicate.
+- **Smart Delete:** Pressing `<BS>` inside empty brackets (e.g. `(|)`) deletes both the opening and closing brackets.
+- **Visual Selection Wrapping:** Selecting text in Visual mode and typing an opening character wraps the selection in the corresponding pair.
 
 ### Disabling Treesitter Indentation Conflicts
 
