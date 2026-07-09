@@ -80,6 +80,7 @@ local function find_first_dot_index(s, lang)
   end
   return nil
 end
+M.find_first_dot_index = find_first_dot_index
 
 function M.get_indent(lang, lnum)
   lnum = lnum or vim.v.lnum
@@ -125,11 +126,30 @@ function M.get_indent(lang, lnum)
     if dot_idx then
       return dot_idx - 1
     end
+    -- Lookahead: if the line below starts with a dot, inherit its indentation
+    local nlnum = vim.fn.nextnonblank(lnum + 1)
+    if nlnum > 0 then
+      local nline = vim.fn.getline(nlnum)
+      if nline:match("^%s*%&?%.") then
+        return vim.fn.indent(nlnum)
+      end
+    end
   end
 
   if pline_starts_with_dot then
     if cline_starts_with_dot or cline_is_empty then
       return vim.fn.indent(plnum)
+    end
+  end
+
+  if cline_is_empty and align_dot_chains then
+    -- Lookahead: if the line below starts with a dot, inherit its indentation
+    local nlnum = vim.fn.nextnonblank(lnum + 1)
+    if nlnum > 0 then
+      local nline = vim.fn.getline(nlnum)
+      if nline:match("^%s*%&?%.") then
+        return vim.fn.indent(nlnum)
+      end
     end
   end
 
