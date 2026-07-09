@@ -1,10 +1,10 @@
 local M = {}
 
-local left = vim.api.nvim_replace_termcodes("<Left>", true, false, true)
-local right = vim.api.nvim_replace_termcodes("<Right>", true, false, true)
-local del_bs = vim.api.nvim_replace_termcodes("<Del><BS>", true, false, true)
-local esc = vim.api.nvim_replace_termcodes("<Esc>", true, false, true)
-local cr_expand = vim.api.nvim_replace_termcodes("<CR><Esc>O", true, false, true)
+local left = "<Left>"
+local right = "<Right>"
+local del_bs = "<Del><BS>"
+local esc = "<Esc>"
+local cr_expand = "<CR><Esc>O"
 
 local pair_definitions = {
   ["("] = ")",
@@ -72,7 +72,7 @@ function M.handle_backspace()
   if pair_definitions[char_before] == char_after then
     return del_bs
   end
-  return vim.api.nvim_replace_termcodes("<BS>", true, false, true)
+  return "<BS>"
 end
 
 function M.handle_cr()
@@ -82,7 +82,7 @@ function M.handle_cr()
      (char_before == "(" and char_after == ")") then
     return cr_expand
   end
-  return vim.api.nvim_replace_termcodes("<CR>", true, false, true)
+  return "<CR>"
 end
 
 function M.wrap_selection(char)
@@ -126,12 +126,12 @@ function M.setup(opts)
 
   -- Register Insert mode expression mappings
   local function map_insert(char, fn)
-    vim.keymap.set("i", char, fn, { expr = true, replace_keycodes = false, silent = true })
+    vim.keymap.set("i", char, fn, { expr = true, replace_keycodes = true, silent = true })
   end
 
   -- Register Visual mode expression mappings for selection wrapping
   local function map_visual(char, fn)
-    vim.keymap.set("x", char, fn, { expr = true, replace_keycodes = false, silent = true })
+    vim.keymap.set("x", char, fn, { expr = true, replace_keycodes = true, silent = true })
   end
 
   -- Map opening/closing pairs in Insert mode
