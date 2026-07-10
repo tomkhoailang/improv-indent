@@ -34,6 +34,10 @@ function M.setup(opts)
             local ft = vim.bo[buf].filetype
             if rules.rules[ft] and rules.rules[ft].enabled then
               local target_row = start_row + new_row
+              local line_count = vim.api.nvim_buf_line_count(buf)
+              if start_row < 0 or start_row >= line_count or target_row < 0 or target_row >= line_count then
+                return
+              end
               local prev_line = vim.api.nvim_buf_get_lines(buf, start_row, start_row + 1, true)[1]
               local lines = vim.api.nvim_buf_get_lines(buf, target_row, target_row + 1, true)
               local line = lines[1]
