@@ -34,10 +34,6 @@ function M.setup(opts)
             local ft = vim.bo[buf].filetype
             if rules.rules[ft] and rules.rules[ft].enabled then
               local target_row = start_row + new_row
-              local line_count = vim.api.nvim_buf_line_count(buf)
-              if start_row < 0 or start_row >= line_count or target_row < 0 or target_row >= line_count then
-                return
-              end
               local prev_line = vim.api.nvim_buf_get_lines(buf, start_row, start_row + 1, true)[1]
               local lines = vim.api.nvim_buf_get_lines(buf, target_row, target_row + 1, true)
               local line = lines[1]
@@ -173,18 +169,6 @@ function M.setup(opts)
       end
       vim.bo[bufnr].indentexpr = "v:lua.GetCustomIndent()"
 
-      -- Prevent "." from triggering indentexpr on the current line.
-      -- Ruby's runtime indent file adds "." to indentkeys, which re-indents
-      -- the entire line whenever "." is typed (even mid-line), causing it to
-      -- snap to the wrong indent level. Remove it; dot-chain alignment is
-      -- handled by TextChangedI instead.
-      vim.schedule(function()
-        if vim.api.nvim_buf_is_valid(bufnr) then
-          vim.api.nvim_buf_call(bufnr, function()
-            vim.cmd "silent! setlocal indentkeys-=."
-          end)
-        end
-      end)
       if vim.g.vscode then
         setup_buf_listener(bufnr)
       end
@@ -244,29 +228,14 @@ function M.setup(opts)
           local cursor = vim.api.nvim_win_get_cursor(0)
           local current_indent = vim.fn.indent(lnum)
           if cursor[2] == current_indent then
-            -- Only jump past the dot when nothing follows it.
-            -- If content exists after the dot (e.g. ".joins(:scores)"), the user
-            -- just deleted a prefix (like `cupping_session_samples`) and the cursor
-            -- arrived at the dot position via backspace — do NOT push it forward.
-            local after_dot = line:match("^%s*%&?%.(.*)")
-            if after_dot and after_dot:match("^%s*$") then
-              pcall(vim.api.nvim_win_set_cursor, 0, { lnum, current_indent + 1 })
-            end
+            pcall(vim.api.nvim_win_set_cursor, 0, { lnum, current_indent + 1 })
           end
         end
 
         -- 3. Original TextChangedI alignment logic (for typing dot or brackets)
         local should_align = false
         if line:match("^%s*%&?%.") then
-          -- Guard: only realign when the cursor is past the dot (user just typed it).
-          -- If cursor is AT the dot position, the user deleted a prefix to expose the dot
-          -- (e.g. removed 'cupping_session_samples' from 'cupping_session_samples.joins(...)')
-          -- — the existing indent is already correct, don't touch it.
-          local cursor_col   = vim.api.nvim_win_get_cursor(0)[2]
-          local indent_cols  = vim.fn.indent(lnum)
-          if cursor_col > indent_cols then
-            should_align = true
-          end
+          should_align = true
         elseif not vim.g.vscode and line:match("^%s*[)}%]]") then
           should_align = true
         end
@@ -303,6 +272,78 @@ function M.setup(opts)
   if opts.autopair ~= false then
     require("improv-indent.autopair").setup(opts.autopair_opts)
   end
+
+  -- Asynchronously format parent control-flow statements and braces on Enter inside {}
+  local format_group = vim.api.nvim_create_augroup("ImprovIndentSmartEnter", { clear = true })
+  vim.api.nvim_create_autocmd("TextChangedI", {
+    group = format_group,
+    pattern = "*",
+    callback = function(args)
+      local bufnr = args.buf
+      local ft = vim.bo[bufnr].filetype
+      local base_ft = ft:gsub("react$", "")
+
+      local rules = require("indent_rules").rules
+      local lang_rules = rules[ft] or rules[base_ft]
+      if not lang_rules or not lang_rules.enabled then
+        return
+      end
+
+      local lnum = vim.api.nvim_win_get_cursor(0)[1]
+      if lnum <= 1 then
+        return
+      end
+
+      local pline = vim.fn.getline(lnum - 1)
+      local line = vim.fn.getline(lnum)
+      local nline = vim.fn.getline(lnum + 1)
+
+      -- 1. Structural check: expand block pattern
+      if pline:match("{%s*$") and line:match("^%s*$") and nline:match("^%s*}%s*$") then
+        -- Skip comments
+        if pline:match("^%s*//") or pline:match("^%s*%*") or pline:match("^%s*/%*") then
+          return
+        end
+
+        local parent_lnum = lnum - 1
+        local pline_len = #pline
+
+        -- 2. Format parent line using LSP (matches VS Code's formatOnType)
+        local clients = vim.lsp.get_clients({ bufnr = bufnr })
+        local has_range_formatter = false
+        for _, client in ipairs(clients) do
+          if client:supports_method("textDocument/rangeFormatting") then
+            has_range_formatter = true
+            break
+          end
+        end
+
+        if has_range_formatter then
+          vim.lsp.buf.format({
+            bufnr = bufnr,
+            range = {
+              ["start"] = { parent_lnum, 0 },
+              ["end"] = { parent_lnum, pline_len },
+            },
+            async = true,
+          })
+        else
+          -- Fallback to regex if LSP formatting is not ready/available
+          local formatted = pline
+          local keywords = lang_rules.smart_enter_keywords or {}
+          for _, kw in ipairs(keywords) do
+            formatted = formatted:gsub("(%f[%w]" .. kw .. ")%s*(%()", "%1 %2")
+          end
+
+          formatted = formatted:gsub("([^%s%$])%s*({%s*)$", "%1 %2")
+
+          if formatted ~= pline then
+            vim.fn.setline(parent_lnum, formatted)
+          end
+        end
+      end
+    end,
+  })
 
   -- Register autocommand to restore indentation settings after loading a session
   vim.api.nvim_create_autocmd("SessionLoadPost", {

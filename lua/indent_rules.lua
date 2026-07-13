@@ -24,6 +24,7 @@ M.rules = {
     decrease = [=[\v^\s*[\}\]\)].*$]=],
     comment = [=[%/%/.*]=],
     enabled = false,
+    smart_enter_keywords = { "if", "for", "while", "switch", "catch" },
   },
   ["cs"] = {
     increase = [=[]=],
@@ -72,6 +73,7 @@ M.rules = {
     decrease = [=[\v^\s*(<case>.*:|<default>:|}[)}]*[)]?|\)[]?)$]=],
     comment = [=[%/%/.*]=],
     enabled = false,
+    smart_enter_keywords = { "if", "for", "switch", "select" },
   },
   ["groovy"] = {
     increase = [=[]=],
@@ -108,12 +110,14 @@ M.rules = {
     decrease = [=[]=],
     comment = [=[%/%/.*]=],
     enabled = false,
+    smart_enter_keywords = { "if", "for", "while", "switch", "catch" },
   },
   ["javascript"] = {
     increase = [=[]=],
     decrease = [=[]=],
     comment = nil,
     enabled = false,
+    smart_enter_keywords = { "if", "for", "while", "switch", "catch" },
   },
   ["json"] = {
     increase = [=[\v({+(?=((\\.|[^"\\])*"(\\.|[^"\\])*")*[^"}]*)$)|(\[+(?=((\\.|[^"\\])*"(\\.|[^"\\])*")*[^"\]]*)$)]=],
@@ -218,6 +222,7 @@ M.rules = {
     comment = [=[//.*]=],
     enabled = true,
     align_dot_chains = false,
+    smart_enter_keywords = { "if", "for", "while", "match" },
   },
   ["scss"] = {
     increase = [=[\v(^.*\{[^}]*$)]=],
@@ -254,6 +259,7 @@ M.rules = {
     decrease = [=[\v^\s*[\}\]\)].*$]=],
     comment = [=[%/%/.*]=],
     enabled = false,
+    smart_enter_keywords = { "if", "for", "while", "switch", "catch" },
   },
   ["vb"] = {
     increase = [=[\v^\s*((If|ElseIf)>.*<Then\s*(('|REM).*)?|(Else|While|For|Do|Select\s+Case|Case|Sub|Function|Class|Module|Enum|Structure|Interface|Namespace|With|Try|Catch|Finally|SyncLock|Using|Property|Get|Set|AddHandler|RaiseEvent|RemoveHandler|Event|Operator)>(?!.*<End\s+(If|Sub|Function|Class|Module|Enum|Structure|Interface|Namespace|With|Select|Try|While|For|Property|Get|Set|SyncLock|Using|AddHandler|RaiseEvent|RemoveHandler|Event|Operator)>).*(('|REM).*)?)$]=],
