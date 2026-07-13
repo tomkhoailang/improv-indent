@@ -51,7 +51,7 @@ M.rules = {
     enabled = false,
   },
   ["docker"] = {
-    increase = [=[\v^\s*.*(:|-) ?(&amp;\w+)?(\{[^}"']*|\([^)"']*)?$]=],
+    increase = [=[\v^\s*.*(:|-) ?(&\w+)?(\{[^}"']*|\([^)"']*)?$]=],
     decrease = [=[\v^\s+\}$]=],
     comment = [=[%#.*]=],
     enabled = false,
@@ -120,8 +120,8 @@ M.rules = {
     smart_enter_keywords = { "if", "for", "while", "switch", "catch" },
   },
   ["json"] = {
-    increase = [=[\v({+(?=((\\.|[^"\\])*"(\\.|[^"\\])*")*[^"}]*)$)|(\[+(?=((\\.|[^"\\])*"(\\.|[^"\\])*")*[^"\]]*)$)]=],
-    decrease = [=[\v^\s*[}\]],?\s*$]=],
+    increase = "",
+    decrease = "",
     comment = [=[%/%/.*]=],
     enabled = false,
   },
@@ -274,7 +274,7 @@ M.rules = {
     enabled = false,
   },
   ["yaml"] = {
-    increase = [=[\v^\s*.*(:|-) ?(&amp;\w+)?(\{[^}"']*|\([^)"']*)?$]=],
+    increase = [=[\v^\s*.*(:|-) ?(&\w+)?(\{[^}"']*|\([^)"']*)?$]=],
     decrease = [=[\v^\s+\}$]=],
     comment = [=[%#.*]=],
     enabled = false,

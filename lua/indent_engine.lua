@@ -10,7 +10,8 @@ local function count_unmatched_brackets(s, lang)
     -- Also strip block comments for Rust
     s = s:gsub("/%*.-%*/", "")
   end
-  -- Remove single-line strings
+  -- Remove single-line strings (handling escaped quotes and backslashes)
+  s = s:gsub('\\\\', ""):gsub('\\"', ""):gsub('\\\'', "")
   s = s:gsub('"[^"]*"', ""):gsub("'[^']*'", "")
 
   local count = 0
