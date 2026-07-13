@@ -6,7 +6,7 @@ local del_bs = "<Del><BS>"
 local esc = "<Esc>"
 local cr_expand = "<CR><Esc>O"
 
-local pair_definitions = {
+local default_pair_definitions = {
   ["("] = ")",
   ["["] = "]",
   ["{"] = "}",
@@ -27,6 +27,8 @@ local visual_pairs = {
 local allowed_brackets = "'\"`;:.,=}])> \t"
 local allowed_quotes = ";:.,=}])> \t"
 
+M.user_pairs = nil
+
 function M.get_cursor_context()
   local col = vim.api.nvim_win_get_cursor(0)[2]
   local line = vim.api.nvim_get_current_line()
@@ -35,9 +37,30 @@ function M.get_cursor_context()
   return char_before, char_after
 end
 
+function M.get_pairs_for_buf(bufnr)
+  local ft = vim.bo[bufnr].filetype
+  local base_ft = ft:gsub("react$", "")
+
+  local ok, rules = pcall(require, "indent_rules")
+  if ok and rules.rules then
+    local lang_rules = rules.rules[ft] or rules.rules[base_ft]
+    if lang_rules and lang_rules.pairs then
+      return lang_rules.pairs
+    end
+  end
+
+  return M.user_pairs or default_pair_definitions
+end
+
 function M.handle_open(open_char)
+  local bufnr = vim.api.nvim_get_current_buf()
+  local pairs = M.get_pairs_for_buf(bufnr)
   local char_before, char_after = M.get_cursor_context()
-  local close_char = pair_definitions[open_char]
+  local close_char = pairs[open_char] or default_pair_definitions[open_char] or ""
+
+  if close_char == "" then
+    return open_char
+  end
 
   -- Quote-specific checks
   if open_char == '"' or open_char == "'" or open_char == "`" then
@@ -68,18 +91,20 @@ function M.handle_close(close_char)
 end
 
 function M.handle_backspace()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local pairs = M.get_pairs_for_buf(bufnr)
   local char_before, char_after = M.get_cursor_context()
-  if pair_definitions[char_before] == char_after then
+  if pairs[char_before] == char_after then
     return del_bs
   end
   return "<BS>"
 end
 
 function M.handle_cr()
+  local bufnr = vim.api.nvim_get_current_buf()
+  local pairs = M.get_pairs_for_buf(bufnr)
   local char_before, char_after = M.get_cursor_context()
-  if (char_before == "{" and char_after == "}") or
-     (char_before == "[" and char_after == "]") or
-     (char_before == "(" and char_after == ")") then
+  if pairs[char_before] == char_after then
     return cr_expand
   end
   return "<CR>"
@@ -124,6 +149,11 @@ end
 function M.setup(opts)
   opts = opts or {}
 
+  -- Store user-configured pairs if provided
+  if opts.pairs then
+    M.user_pairs = opts.pairs
+  end
+
   -- Register Insert mode expression mappings
   local function map_insert(char, fn)
     vim.keymap.set("i", char, fn, { expr = true, replace_keycodes = true, silent = true })
@@ -135,7 +165,8 @@ function M.setup(opts)
   end
 
   -- Map opening/closing pairs in Insert mode
-  for open_char, close_char in pairs(pair_definitions) do
+  local pairs_to_map = M.user_pairs or default_pair_definitions
+  for open_char, close_char in pairs(pairs_to_map) do
     if open_char ~= close_char then
       map_insert(open_char, function()
         return M.handle_open(open_char)

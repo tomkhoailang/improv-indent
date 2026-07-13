@@ -233,11 +233,17 @@ function M.setup(opts)
         end
 
         -- 3. Original TextChangedI alignment logic (for typing dot or brackets)
+        local line_len = #line
+        local last_line_len = vim.b[bufnr].last_line_len or line_len
+        vim.b[bufnr].last_line_len = line_len
+
         local should_align = false
-        if line:match("^%s*%&?%.") then
-          should_align = true
-        elseif not vim.g.vscode and line:match("^%s*[)}%]]") then
-          should_align = true
+        if line_len >= last_line_len then
+          if line:match("^%s*%&?%.") then
+            should_align = true
+          elseif not vim.g.vscode and line:match("^%s*[)}%]]") then
+            should_align = true
+          end
         end
 
         if should_align then
@@ -367,6 +373,10 @@ function M.setup(opts)
       end
     end,
   })
+end
+
+function M.map_bs()
+  return require("improv-indent.autopair").handle_backspace()
 end
 
 return M
