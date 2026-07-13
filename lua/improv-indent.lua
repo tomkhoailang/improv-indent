@@ -279,7 +279,19 @@ function M.setup(opts)
     group = format_group,
     pattern = "*",
     callback = function(args)
+      if vim.g.vscode then
+        return
+      end
+
       local bufnr = args.buf
+      local line_count = vim.api.nvim_buf_line_count(bufnr)
+      local last_count = vim.b[bufnr].last_line_count or line_count
+      vim.b[bufnr].last_line_count = line_count
+
+      if line_count <= last_count then
+        return
+      end
+
       local ft = vim.bo[bufnr].filetype
       local base_ft = ft:gsub("react$", "")
 
