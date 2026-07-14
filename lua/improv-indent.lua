@@ -38,10 +38,18 @@ function M.setup(opts)
               local lines = vim.api.nvim_buf_get_lines(buf, target_row, target_row + 1, true)
               local line = lines[1]
               
+              local align_dot_chains = rules.rules[ft].align_dot_chains
+              if align_dot_chains == nil then
+                align_dot_chains = vim.g.align_dot_chains
+                if align_dot_chains == nil then
+                  align_dot_chains = true
+                end
+              end
+
               local moved_trailing_dot = false
               local new_indent = nil
               
-              if new_row > 0 and prev_line and prev_line:match("%.$") and line and line:match("^%s*$") then
+              if align_dot_chains and new_row > 0 and prev_line and prev_line:match("%.$") and line and line:match("^%s*$") then
                 local stripped_prev = prev_line:sub(1, -2)
                 local engine = require("indent_engine")
                 local dot_idx = engine.find_first_dot_index(stripped_prev, ft)
@@ -60,7 +68,7 @@ function M.setup(opts)
                 end
               end
 
-              if line then
+              if line and align_dot_chains then
                 local should_align = false
                 local is_empty = line:match("^%s*$") ~= nil
                 if new_row > 0 then

@@ -122,42 +122,44 @@ function M.get_indent(lang, lnum)
     end
   end
 
-  if cline_starts_with_dot and align_dot_chains then
-    local dot_idx = find_first_dot_index(pline, lang)
-    if dot_idx then
-      return dot_idx - 1
-    end
-    -- Lookahead: if the line below starts with a dot, inherit its indentation
-    local nlnum = vim.fn.nextnonblank(lnum + 1)
-    if nlnum > 0 then
-      local nline = vim.fn.getline(nlnum)
-      if nline:match("^%s*%&?%.") then
-        return vim.fn.indent(nlnum)
+  if align_dot_chains then
+    if cline_starts_with_dot then
+      local dot_idx = find_first_dot_index(pline, lang)
+      if dot_idx then
+        return dot_idx - 1
+      end
+      -- Lookahead: if the line below starts with a dot, inherit its indentation
+      local nlnum = vim.fn.nextnonblank(lnum + 1)
+      if nlnum > 0 then
+        local nline = vim.fn.getline(nlnum)
+        if nline:match("^%s*%&?%.") then
+          return vim.fn.indent(nlnum)
+        end
       end
     end
-  end
 
-  if pline_starts_with_dot then
-    if cline_starts_with_dot or cline_is_empty then
-      return vim.fn.indent(plnum)
-    end
-  end
-
-  if cline_is_empty and align_dot_chains then
-    -- Lookahead: if the line below starts with a dot, inherit its indentation
-    local nlnum = vim.fn.nextnonblank(lnum + 1)
-    if nlnum > 0 then
-      local nline = vim.fn.getline(nlnum)
-      if nline:match("^%s*%&?%.") then
-        return vim.fn.indent(nlnum)
+    if pline_starts_with_dot then
+      if cline_starts_with_dot or cline_is_empty then
+        return vim.fn.indent(plnum)
       end
     end
-  end
 
-  if cline_starts_with_dot then
-    local cur_indent = vim.fn.indent(lnum)
-    if cur_indent > 0 then
-      return cur_indent
+    if cline_is_empty then
+      -- Lookahead: if the line below starts with a dot, inherit its indentation
+      local nlnum = vim.fn.nextnonblank(lnum + 1)
+      if nlnum > 0 then
+        local nline = vim.fn.getline(nlnum)
+        if nline:match("^%s*%&?%.") then
+          return vim.fn.indent(nlnum)
+        end
+      end
+    end
+
+    if cline_starts_with_dot then
+      local cur_indent = vim.fn.indent(lnum)
+      if cur_indent > 0 then
+        return cur_indent
+      end
     end
   end
 
