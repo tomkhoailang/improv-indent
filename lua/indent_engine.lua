@@ -55,33 +55,6 @@ local function get_matching_open_bracket_indent(lnum, cline)
   return nil
 end
 
-local function find_first_dot_index(s, lang)
-  local lang_rules = rules[lang]
-  local comment_pat = lang_rules and lang_rules.comment or "#.*"
-  -- Remove comments
-  s = s:gsub(comment_pat, "")
-  if lang == "rust" then
-    s = s:gsub("/%*.-%*/", "")
-  end
-
-  local in_double_quote = false
-  local in_single_quote = false
-  for i = 1, #s do
-    local c = s:sub(i, i)
-    if c == '"' and not in_single_quote then
-      in_double_quote = not in_double_quote
-    elseif c == "'" and not in_double_quote then
-      in_single_quote = not in_single_quote
-    elseif c == "." and not in_double_quote and not in_single_quote then
-      local next_char = s:sub(i + 1, i + 1)
-      if next_char:match("[a-zA-Z_]") then
-        return i
-      end
-    end
-  end
-  return nil
-end
-M.find_first_dot_index = find_first_dot_index
 
 function M.get_indent(lang, lnum)
   lnum = lnum or vim.v.lnum
@@ -109,59 +82,6 @@ function M.get_indent(lang, lnum)
   local base_indent = vim.fn.indent(plnum)
   local sw = vim.fn.shiftwidth()
 
-  -- 1. Preserve dot-chain manually aligned indentation (prevents snapping)
-  local pline_starts_with_dot = pline:match("^%s*%&?%.")
-  local cline_starts_with_dot = cline:match("^%s*%&?%.")
-  local cline_is_empty = cline:match("^%s*$") ~= nil
-
-  local align_dot_chains = lang_rules.align_dot_chains
-  if align_dot_chains == nil then
-    align_dot_chains = vim.g.align_dot_chains
-    if align_dot_chains == nil then
-      align_dot_chains = true
-    end
-  end
-
-  if align_dot_chains then
-    if cline_starts_with_dot then
-      local dot_idx = find_first_dot_index(pline, lang)
-      if dot_idx then
-        return dot_idx - 1
-      end
-      -- Lookahead: if the line below starts with a dot, inherit its indentation
-      local nlnum = vim.fn.nextnonblank(lnum + 1)
-      if nlnum > 0 then
-        local nline = vim.fn.getline(nlnum)
-        if nline:match("^%s*%&?%.") then
-          return vim.fn.indent(nlnum)
-        end
-      end
-    end
-
-    if pline_starts_with_dot then
-      if cline_starts_with_dot or cline_is_empty then
-        return vim.fn.indent(plnum)
-      end
-    end
-
-    if cline_is_empty then
-      -- Lookahead: if the line below starts with a dot, inherit its indentation
-      local nlnum = vim.fn.nextnonblank(lnum + 1)
-      if nlnum > 0 then
-        local nline = vim.fn.getline(nlnum)
-        if nline:match("^%s*%&?%.") then
-          return vim.fn.indent(nlnum)
-        end
-      end
-    end
-
-    if cline_starts_with_dot then
-      local cur_indent = vim.fn.indent(lnum)
-      if cur_indent > 0 then
-        return cur_indent
-      end
-    end
-  end
 
   -- 2. Determine if we should increase indentation
   local should_indent = false

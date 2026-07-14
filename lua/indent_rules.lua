@@ -214,14 +214,12 @@ M.rules = {
     decrease = [=[\v^\s*([\}\]\)]|(end|else|elsif|ensure|rescue|when)>)]=],
     comment = [=[#.*]=],
     enabled = true,
-    align_dot_chains = true,
   },
   ["rust"] = {
     increase = [=[\v^.*\{[^}"']*$|^.*\([^)"']*$]=],
     decrease = [=[\v^\s*(\s*/\*.*\*/\s*)*[})]]=],
     comment = [=[//.*]=],
     enabled = true,
-    align_dot_chains = false,
     smart_enter_keywords = { "if", "for", "while", "match" },
   },
   ["scss"] = {
