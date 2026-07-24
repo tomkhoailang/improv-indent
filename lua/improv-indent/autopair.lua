@@ -27,6 +27,19 @@ local visual_pairs = {
 local allowed_brackets = "'\"`;:.,=}])> \t"
 local allowed_quotes = ";:.,=}])> \t"
 
+local ns = vim.api.nvim_create_namespace("improv_indent_autopair")
+
+local function track_inserted_char(bufnr)
+  vim.schedule(function()
+    if vim.api.nvim_buf_is_valid(bufnr) then
+      local r, c = unpack(vim.api.nvim_win_get_cursor(0))
+      vim.api.nvim_buf_set_extmark(bufnr, ns, r - 1, c, {
+        right_gravity = true,
+      })
+    end
+  end)
+end
+
 M.user_pairs = nil
 
 function M.get_cursor_context()
@@ -79,13 +92,20 @@ function M.handle_open(open_char)
     end
   end
 
+  track_inserted_char(bufnr)
   return open_char .. close_char .. left
 end
 
 function M.handle_close(close_char)
+  local bufnr = vim.api.nvim_get_current_buf()
   local _, char_after = M.get_cursor_context()
   if char_after == close_char then
-    return right
+    local r, c = unpack(vim.api.nvim_win_get_cursor(0))
+    local marks = vim.api.nvim_buf_get_extmarks(bufnr, ns, { r - 1, c }, { r - 1, c }, {})
+    if #marks > 0 then
+      vim.api.nvim_buf_del_extmark(bufnr, ns, marks[1][1])
+      return right
+    end
   end
   return close_char
 end
@@ -95,7 +115,12 @@ function M.handle_backspace()
   local pairs = M.get_pairs_for_buf(bufnr)
   local char_before, char_after = M.get_cursor_context()
   if pairs[char_before] == char_after then
-    return del_bs
+    local r, c = unpack(vim.api.nvim_win_get_cursor(0))
+    local marks = vim.api.nvim_buf_get_extmarks(bufnr, ns, { r - 1, c }, { r - 1, c }, {})
+    if #marks > 0 then
+      vim.api.nvim_buf_del_extmark(bufnr, ns, marks[1][1])
+      return del_bs
+    end
   end
   return "<BS>"
 end
@@ -177,9 +202,15 @@ function M.setup(opts)
     else
       -- Quotes (same character for open/close)
       map_insert(open_char, function()
+        local bufnr = vim.api.nvim_get_current_buf()
         local _, char_after = M.get_cursor_context()
         if char_after == open_char then
-          return right
+          local r, c = unpack(vim.api.nvim_win_get_cursor(0))
+          local marks = vim.api.nvim_buf_get_extmarks(bufnr, ns, { r - 1, c }, { r - 1, c }, {})
+          if #marks > 0 then
+            vim.api.nvim_buf_del_extmark(bufnr, ns, marks[1][1])
+            return right
+          end
         end
         return M.handle_open(open_char)
       end)
@@ -194,6 +225,14 @@ function M.setup(opts)
   -- Map backspace and enter in Insert mode
   map_insert("<BS>", M.handle_backspace)
   map_insert("<CR>", M.handle_cr)
+
+  -- Clear namespace on InsertLeave
+  vim.api.nvim_create_autocmd("InsertLeave", {
+    callback = function()
+      local bufnr = vim.api.nvim_get_current_buf()
+      vim.api.nvim_buf_clear_namespace(bufnr, ns, 0, -1)
+    end,
+  })
 end
 
 return M

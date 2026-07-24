@@ -41,12 +41,15 @@ local function get_matching_open_bracket_indent(lnum, cline)
     open_char, close_char = "[", "]"
   end
 
+  local open_pat = open_char == "[" and "\\[" or open_char
+  local close_pat = close_char == "]" and "\\]" or close_char
+
   local skip_expr = "synIDattr(synID(line('.'), col('.'), 0), 'name') =~? 'comment\\|string'"
   local ok_win, win = pcall(vim.api.nvim_get_current_win)
   if ok_win and win and vim.api.nvim_win_is_valid(win) then
     local save_cursor = vim.api.nvim_win_get_cursor(win)
     pcall(vim.api.nvim_win_set_cursor, win, { lnum, col - 1 })
-    local match_pos = vim.fn.searchpairpos(open_char, "", close_char, "bWn", skip_expr)
+    local match_pos = vim.fn.searchpairpos(open_pat, "", close_pat, "bWn", skip_expr)
     pcall(vim.api.nvim_win_set_cursor, win, save_cursor)
     if match_pos[1] > 0 then
       return vim.fn.indent(match_pos[1])
