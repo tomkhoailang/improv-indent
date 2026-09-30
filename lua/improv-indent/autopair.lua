@@ -104,8 +104,8 @@ function M.handle_close(close_char)
     local marks = vim.api.nvim_buf_get_extmarks(bufnr, ns, { r - 1, c }, { r - 1, c }, {})
     if #marks > 0 then
       vim.api.nvim_buf_del_extmark(bufnr, ns, marks[1][1])
-      return right
     end
+    return right
   end
   return close_char
 end
@@ -209,8 +209,8 @@ function M.setup(opts)
           local marks = vim.api.nvim_buf_get_extmarks(bufnr, ns, { r - 1, c }, { r - 1, c }, {})
           if #marks > 0 then
             vim.api.nvim_buf_del_extmark(bufnr, ns, marks[1][1])
-            return right
           end
+          return right
         end
         return M.handle_open(open_char)
       end)
