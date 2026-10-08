@@ -26,7 +26,19 @@ local function count_unmatched_brackets(s, lang)
   return count
 end
 
-local function get_matching_open_bracket_indent(lnum, cline)
+local function strip_line(s, lang)
+  local lang_rules = rules[lang]
+  local comment_pat = lang_rules and lang_rules.comment or "#.*"
+  s = s:gsub(comment_pat, "")
+  if lang == "rust" then
+    s = s:gsub("/%*.-%*/", "")
+  end
+  s = s:gsub('\\\\', ""):gsub('\\"', ""):gsub('\\\'', "")
+  s = s:gsub('"[^"]*"', ""):gsub("'[^']*'", "")
+  return s
+end
+
+local function get_matching_open_bracket_indent(lnum, cline, lang)
   -- Find the first closing bracket on the line
   local col = cline:find("[)}%]]")
   if not col then return nil end
@@ -41,18 +53,25 @@ local function get_matching_open_bracket_indent(lnum, cline)
     open_char, close_char = "[", "]"
   end
 
-  local open_pat = open_char == "[" and "\\[" or open_char
-  local close_pat = close_char == "]" and "\\]" or close_char
+  local balance = 1
+  for i = lnum - 1, 1, -1 do
+    local line = vim.fn.getline(i)
+    line = strip_line(line, lang)
 
-  local skip_expr = "synIDattr(synID(line('.'), col('.'), 0), 'name') =~? 'comment\\|string'"
-  local ok_win, win = pcall(vim.api.nvim_get_current_win)
-  if ok_win and win and vim.api.nvim_win_is_valid(win) then
-    local save_cursor = vim.api.nvim_win_get_cursor(win)
-    pcall(vim.api.nvim_win_set_cursor, win, { lnum, col - 1 })
-    local match_pos = vim.fn.searchpairpos(open_pat, "", close_pat, "bWn", skip_expr)
-    pcall(vim.api.nvim_win_set_cursor, win, save_cursor)
-    if match_pos[1] > 0 then
-      return vim.fn.indent(match_pos[1])
+    local open_count = 0
+    local close_count = 0
+    for idx = 1, #line do
+      local c = line:sub(idx, idx)
+      if c == open_char then
+        open_count = open_count + 1
+      elseif c == close_char then
+        close_count = close_count + 1
+      end
+    end
+
+    balance = balance - open_count + close_count
+    if balance <= 0 then
+      return vim.fn.indent(i)
     end
   end
   return nil
@@ -105,7 +124,7 @@ function M.get_indent(lang, lnum)
   end
 
   if should_outdent then
-    local matched_indent = get_matching_open_bracket_indent(lnum, cline)
+    local matched_indent = get_matching_open_bracket_indent(lnum, cline, lang)
     if matched_indent then
       base_indent = matched_indent
     else
