@@ -77,6 +77,18 @@ function M.handle_open(open_char)
 
   -- Quote-specific checks
   if open_char == '"' or open_char == "'" or open_char == "`" then
+    -- Rust: a single quote after a borrow/generic/trait-bound position is a
+    -- lifetime ('a), not a char literal -> don't insert a closing quote.
+    -- At type time the line is incomplete (treesitter reports ERROR), so
+    -- disambiguate from the preceding non-space character instead.
+    if open_char == "'" and vim.bo[bufnr].filetype == "rust" then
+      local col = vim.api.nvim_win_get_cursor(0)[2]
+      local before = vim.api.nvim_get_current_line():sub(1, col)
+      local last = before:match("(%S)%s*$") or ""
+      if last == "&" or last == "<" or last == "+" then
+        return open_char
+      end
+    end
     -- Do not auto-close if preceded by a word character
     if char_before:match("[%w_]") then
       return open_char
