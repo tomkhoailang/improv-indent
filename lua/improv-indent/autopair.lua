@@ -13,6 +13,7 @@ local default_pair_definitions = {
   ['"'] = '"',
   ["'"] = "'",
   ["`"] = "`",
+  ["<"] = ">",
 }
 
 local visual_pairs = {
@@ -26,6 +27,27 @@ local visual_pairs = {
 
 local allowed_brackets = "'\"`;:.,=}])> \t"
 local allowed_quotes = ";:.,=}])> \t"
+
+-- Quotes that do NOT open a literal -> never insert a closer.
+-- Keyed by filetype, then quote char; values are the preceding characters.
+local QUOTE_NOT_LITERAL = {
+  rust = { ["'"] = { "&", "<", "+" } },
+}
+
+-- The prose guard below (`don't`) cannot tell a word from a literal prefix
+-- (`b'`), so a language opts out for the quotes it uses prefixes with.
+local QUOTE_PREFIX_AFTER_WORD = {
+  rust = { ["'"] = true, ['"'] = true },
+}
+
+-- `<` opens a type-argument list after a name (`Vec<`), but is a comparison
+-- after whitespace or an operator (`a < b`). Keyed by filetype; the value is
+-- the pattern the character before `<` must match. Add other filetypes with
+-- their own pattern when needed, e.g.
+--   typescriptreact = "[^%w_]",  -- a JSX tag starts after space/(/=
+local ANGLE_PAIR = {
+  rust = "[%w_:>]",
+}
 
 local ns = vim.api.nvim_create_namespace("improv_indent_autopair")
 
@@ -75,25 +97,31 @@ function M.handle_open(open_char)
     return open_char
   end
 
-  -- Quote-specific checks
-  if open_char == '"' or open_char == "'" or open_char == "`" then
-    -- Rust: a single quote after a borrow/generic/trait-bound position is a
-    -- lifetime ('a), not a char literal -> don't insert a closing quote.
-    -- At type time the line is incomplete (treesitter reports ERROR), so
-    -- disambiguate from the preceding non-space character instead.
-    if open_char == "'" and vim.bo[bufnr].filetype == "rust" then
-      local col = vim.api.nvim_win_get_cursor(0)[2]
-      local before = vim.api.nvim_get_current_line():sub(1, col)
-      local last = before:match("(%S)%s*$") or ""
-      if last == "&" or last == "<" or last == "+" then
+  -- `<` only pairs where it opens a type/JSX argument list.
+  if open_char == "<" then
+    local allowed_after = ANGLE_PAIR[vim.bo[bufnr].filetype]
+    if not allowed_after or not char_before:match(allowed_after) then
+      return open_char
+    end
+  elseif open_char == '"' or open_char == "'" or open_char == "`" then
+    local ft = vim.bo[bufnr].filetype
+    local col = vim.api.nvim_win_get_cursor(0)[2]
+    local last = vim.api.nvim_get_current_line():sub(1, col):match("(%S)%s*$") or ""
+
+    -- A quote that provably does NOT open a literal never gets a closer.
+    for _, ch in ipairs((QUOTE_NOT_LITERAL[ft] or {})[open_char] or {}) do
+      if last == ch then
         return open_char
       end
     end
-    -- Do not auto-close if preceded by a word character
-    if char_before:match("[%w_]") then
+
+    -- Prose guard (`don't`). It cannot tell `b'` from `don'`, so a language
+    -- opts out for the quotes it uses as prefixes.
+    local prefixed = (QUOTE_PREFIX_AFTER_WORD[ft] or {})[open_char]
+    if not prefixed and char_before:match("[%w_]") then
       return open_char
     end
-    -- Check if allowed after
+
     if char_after ~= "" and not allowed_quotes:find(char_after, 1, true) then
       return open_char
     end
