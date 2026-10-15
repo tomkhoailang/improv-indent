@@ -182,8 +182,8 @@ function M.handle_backspace()
   return "<BS>"
 end
 
--- Statements whose missing `;` this feature will place. The bracket is only the
--- trigger; the decision comes from the node the `;` attaches to.
+-- Statements that may take an auto-inserted terminator. The bracket is only
+-- the trigger; the real decision is whether the grammar requires a `;` here.
 local SEMI_STATEMENTS = {
   rust = {
     let_declaration = true,
@@ -196,9 +196,12 @@ local SEMI_STATEMENTS = {
   },
 }
 
--- Parse a copy of the buffer with `new_line` at `row` and return the `;` node
--- at `semi_col` when it is a real terminator, else nil.
-local function whatif_semicolon(bufnr, filetype, row, new_line, semi_col)
+-- Parse a copy of the buffer with `new_line` at `row` and return the zero-width
+-- `;` tree-sitter inserts on that row when the grammar requires a terminator
+-- that is absent, else nil. A bare expression parses as a valid tail expression
+-- and yields nil, which is what keeps `Command::from_value(x)` usable as a
+-- return value.
+local function missing_semicolon(bufnr, filetype, row, new_line)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   lines[row] = new_line
   local text = table.concat(lines, "\n")
@@ -214,25 +217,55 @@ local function whatif_semicolon(bufnr, filetype, row, new_line, semi_col)
     return nil
   end
 
-  local node = trees[1]:root():descendant_for_range(row - 1, semi_col, row - 1, semi_col + 1)
-  if not node or node:type() ~= ";" or node:missing() then
-    return nil
+  local found
+  local function walk(node)
+    if found then
+      return
+    end
+    if node:type() == ";" and node:missing() and select(1, node:range()) == row - 1 then
+      found = node
+      return
+    end
+    for child in node:iter_children() do
+      walk(child)
+    end
   end
-  return node
+  walk(trees[1]:root())
+  return found
 end
 
 -- `let x = if c { ... }` may still take an `else`, so a `;` decided while
 -- closing its then-block (or a condition inside it) is premature.
 local PREMATURE_TAIL = { if_expression = true }
 
-local function terminates_statement(node, kinds)
+-- True only for real parse errors. `node:has_error()` also counts `missing`
+-- nodes, so it is true for the very `;` this feature is looking for.
+local function has_error_node(node)
+  if node:type() == "ERROR" then
+    return true
+  end
+  for child in node:iter_children() do
+    if has_error_node(child) then
+      return true
+    end
+  end
+  return false
+end
+
+-- True when the `;` the grammar requires on `new_line` (which has none yet)
+-- lands on an allowlisted statement.
+local function terminates_statement(bufnr, filetype, row, new_line, kinds)
+  local node = missing_semicolon(bufnr, filetype, row, new_line)
+  if not node then
+    return false
+  end
   local parent = node:parent()
   if not (parent and kinds[parent:type()]) then
     return false
   end
   -- Error recovery can invent a `;` for a half-written statement (e.g.
   -- `let y = if foo(`), so only trust a cleanly parsed statement.
-  if parent:has_error() then
+  if has_error_node(parent) then
     return false
   end
   local prev = node:prev_sibling()
@@ -263,19 +296,14 @@ function M.needs_semicolon(bufnr, close_char, close_col)
     return false
   end
 
-  -- The buffer is syntactically broken by the very `;` we are deciding on, so
-  -- error recovery cannot be trusted. Parse a what-if copy instead.
+  -- Probe without a `;`: the grammar decides whether one is required.
   local new_line
   if has then
-    new_line = line:sub(1, close_col + 1) .. ";" .. line:sub(close_col + 2)
+    new_line = line
   else
-    new_line = line:sub(1, close_col) .. close_char .. ";" .. line:sub(close_col + 1)
+    new_line = line:sub(1, close_col) .. close_char .. line:sub(close_col + 1)
   end
-  local node = whatif_semicolon(bufnr, filetype, row, new_line, close_col + 1)
-  if not node then
-    return false
-  end
-  return terminates_statement(node, kinds)
+  return terminates_statement(bufnr, filetype, row, new_line, kinds)
 end
 
 -- Deciding at open time: the auto-pair is about to insert `open_char` +
@@ -294,12 +322,9 @@ function M.opening_needs_semicolon(bufnr, open_char, close_char)
     return false
   end
 
-  local new_line = line:sub(1, col) .. open_char .. close_char .. ";" .. line:sub(col + 1)
-  local node = whatif_semicolon(bufnr, filetype, row, new_line, col + 2)
-  if not node then
-    return false
-  end
-  return terminates_statement(node, kinds)
+  -- No `;` in the probe: the grammar decides whether one is required.
+  local new_line = line:sub(1, col) .. open_char .. close_char .. line:sub(col + 1)
+  return terminates_statement(bufnr, filetype, row, new_line, kinds)
 end
 
 function M.handle_cr()
