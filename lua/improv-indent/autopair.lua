@@ -133,6 +133,10 @@ function M.handle_open(open_char)
   end
 
   track_inserted_char(bufnr)
+  -- The closer is inserted now, so the statement's `;` is decided now too.
+  if open_char == "{" and M.opening_needs_semicolon(bufnr) then
+    return open_char .. close_char .. ";" .. left .. left
+  end
   return open_char .. close_char .. left
 end
 
@@ -145,7 +149,16 @@ function M.handle_close(close_char)
     if #marks > 0 then
       vim.api.nvim_buf_del_extmark(bufnr, ns, marks[1][1])
     end
+    -- Committing the auto-inserted closer: append the statement's `;` when the
+    -- AST says this `}` terminates one.
+    if close_char == "}" and M.needs_semicolon(bufnr, c) then
+      return right .. ";"
+    end
     return right
+  end
+  -- A hand-typed closer with no auto-pair: `;` belongs immediately after it.
+  if close_char == "}" and M.needs_semicolon(bufnr, vim.api.nvim_win_get_cursor(0)[2]) then
+    return "};"
   end
   return close_char
 end
@@ -165,12 +178,129 @@ function M.handle_backspace()
   return "<BS>"
 end
 
+-- Statements that always terminate with `;`. The closing `}` is only the
+-- trigger; the decision comes from the enclosing statement node.
+local SEMI_STATEMENTS = {
+  rust = { let_declaration = true },
+}
+
+-- Parse a copy of the buffer with `new_line` at `row` and return the parsed
+-- root plus the `;` node at `semi_col` when it is a real terminator, else nil.
+local function whatif_semicolon(bufnr, filetype, row, new_line, semi_col)
+  local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+  lines[row] = new_line
+  local text = table.concat(lines, "\n")
+
+  local ok, parser = pcall(vim.treesitter.get_string_parser, text, filetype, { error = false })
+  if not ok or not parser then
+    return nil
+  end
+  local parsed_ok, trees = pcall(function()
+    return parser:parse()
+  end)
+  if not parsed_ok or not trees or not trees[1] then
+    return nil
+  end
+
+  local root = trees[1]:root()
+  local node = root:descendant_for_range(row - 1, semi_col, row - 1, semi_col + 1)
+  if not node or node:type() ~= ";" or node:missing() then
+    return nil
+  end
+  return root, node
+end
+
+-- True when the cursor sits at the end of a `let` (incl. `let ... else { ... }`)
+-- whose required `;` is missing. Tail expressions are never in this set, so
+-- `fn f() -> i32 { if c { 1 } else { 2 } }` is left alone.
+-- brace_col: 0-based index of the closing `}` in the current line, whether it
+-- already exists (auto-pair) or is about to be typed. Defaults to just behind
+-- the cursor, which is the Enter case (cursor is after the `}`).
+function M.needs_semicolon(bufnr, brace_col)
+  local filetype = vim.bo[bufnr].filetype
+  local kinds = SEMI_STATEMENTS[filetype]
+  if not kinds then
+    return false
+  end
+
+  local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+  brace_col = brace_col or (col - 1)
+
+  local line = vim.api.nvim_get_current_line()
+  local has_brace = line:sub(brace_col + 1, brace_col + 1) == "}"
+  -- The `}` must be (or become) the last non-blank character on the line.
+  if not line:sub(brace_col + (has_brace and 2 or 1)):match("^%s*$") then
+    return false
+  end
+
+  -- The buffer is syntactically broken by the very `;` we are deciding on, so
+  -- error recovery cannot be trusted. Parse a what-if copy instead.
+  local new_line
+  if has_brace then
+    new_line = line:sub(1, brace_col + 1) .. ";" .. line:sub(brace_col + 2)
+  else
+    new_line = line:sub(1, brace_col) .. "};" .. line:sub(brace_col + 1)
+  end
+  local _, node = whatif_semicolon(bufnr, filetype, row, new_line, brace_col + 1)
+  if not node then
+    return false
+  end
+  local parent = node:parent()
+  return parent ~= nil and kinds[parent:type()] == true
+end
+
+-- `let x = if a {} else {}` splits the block, so the `;` belongs after the
+-- `else` block, not this one.
+local OPEN_EXCLUDE = { if_expression = true }
+
+-- Deciding at open time: the auto-pair is about to insert `{}` where the user
+-- typed `{`; say whether the `;` belongs right after that `}`.
+function M.opening_needs_semicolon(bufnr)
+  local filetype = vim.bo[bufnr].filetype
+  local kinds = SEMI_STATEMENTS[filetype]
+  if not kinds then
+    return false
+  end
+
+  local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+  local line = vim.api.nvim_get_current_line()
+  -- Only when the auto-inserted `}` would land at the end of the line.
+  if not line:sub(col + 1):match("^%s*$") then
+    return false
+  end
+
+  local new_line = line:sub(1, col) .. "{};" .. line:sub(col + 1)
+  local root, node = whatif_semicolon(bufnr, filetype, row, new_line, col + 2)
+  if not node then
+    return false
+  end
+
+  local parent = node:parent()
+  if not (parent and kinds[parent:type()]) then
+    return false
+  end
+
+  local block = root:descendant_for_range(row - 1, col, row - 1, col + 2)
+  if block and block:parent() and OPEN_EXCLUDE[block:parent():type()] then
+    return false
+  end
+  return true
+end
+
 function M.handle_cr()
   local bufnr = vim.api.nvim_get_current_buf()
   local pairs = M.get_pairs_for_buf(bufnr)
   local char_before, char_after = M.get_cursor_context()
   if pairs[char_before] == char_after then
     return cr_expand
+  end
+  -- Rust: finishing a `let ... else { ... }` (or any `let`) should place the
+  -- `;` for you. Only when the cursor is at the end of the closing `}`.
+  local col = vim.api.nvim_win_get_cursor(0)[2]
+  local line = vim.api.nvim_get_current_line()
+  if line:sub(col + 1):match("^%s*$") and line:sub(1, col):match("}%s*$")
+      and M.needs_semicolon(bufnr) then
+    return "<End>;<CR>"
   end
   return "<CR>"
 end
