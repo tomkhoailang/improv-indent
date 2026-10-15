@@ -51,6 +51,10 @@ local ANGLE_PAIR = {
 
 local ns = vim.api.nvim_create_namespace("improv_indent_autopair")
 
+-- Closing brackets we know how to reason about. Block-like statements land on
+-- `empty_statement` instead, so they self-exclude.
+local SEMI_BRACKETS = { [")"] = true, ["]"] = true, ["}"] = true }
+
 local function track_inserted_char(bufnr)
   vim.schedule(function()
     if vim.api.nvim_buf_is_valid(bufnr) then
@@ -134,7 +138,7 @@ function M.handle_open(open_char)
 
   track_inserted_char(bufnr)
   -- The closer is inserted now, so the statement's `;` is decided now too.
-  if open_char == "{" and M.opening_needs_semicolon(bufnr) then
+  if SEMI_BRACKETS[close_char] and M.opening_needs_semicolon(bufnr, open_char, close_char) then
     return open_char .. close_char .. ";" .. left .. left
   end
   return open_char .. close_char .. left
@@ -150,15 +154,15 @@ function M.handle_close(close_char)
       vim.api.nvim_buf_del_extmark(bufnr, ns, marks[1][1])
     end
     -- Committing the auto-inserted closer: append the statement's `;` when the
-    -- AST says this `}` terminates one.
-    if close_char == "}" and M.needs_semicolon(bufnr, c) then
+    -- AST says this bracket terminates one.
+    if SEMI_BRACKETS[close_char] and M.needs_semicolon(bufnr, close_char, c) then
       return right .. ";"
     end
     return right
   end
   -- A hand-typed closer with no auto-pair: `;` belongs immediately after it.
-  if close_char == "}" and M.needs_semicolon(bufnr, vim.api.nvim_win_get_cursor(0)[2]) then
-    return "};"
+  if SEMI_BRACKETS[close_char] and M.needs_semicolon(bufnr, close_char, vim.api.nvim_win_get_cursor(0)[2]) then
+    return close_char .. ";"
   end
   return close_char
 end
@@ -178,14 +182,22 @@ function M.handle_backspace()
   return "<BS>"
 end
 
--- Statements that always terminate with `;`. The closing `}` is only the
--- trigger; the decision comes from the enclosing statement node.
+-- Statements whose missing `;` this feature will place. The bracket is only the
+-- trigger; the decision comes from the node the `;` attaches to.
 local SEMI_STATEMENTS = {
-  rust = { let_declaration = true },
+  rust = {
+    let_declaration = true,
+    expression_statement = true,
+    use_declaration = true,
+    type_item = true,
+    const_item = true,
+    static_item = true,
+    mod_item = true,
+  },
 }
 
--- Parse a copy of the buffer with `new_line` at `row` and return the parsed
--- root plus the `;` node at `semi_col` when it is a real terminator, else nil.
+-- Parse a copy of the buffer with `new_line` at `row` and return the `;` node
+-- at `semi_col` when it is a real terminator, else nil.
 local function whatif_semicolon(bufnr, filetype, row, new_line, semi_col)
   local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   lines[row] = new_line
@@ -202,60 +214,73 @@ local function whatif_semicolon(bufnr, filetype, row, new_line, semi_col)
     return nil
   end
 
-  local root = trees[1]:root()
-  local node = root:descendant_for_range(row - 1, semi_col, row - 1, semi_col + 1)
+  local node = trees[1]:root():descendant_for_range(row - 1, semi_col, row - 1, semi_col + 1)
   if not node or node:type() ~= ";" or node:missing() then
     return nil
   end
-  return root, node
+  return node
 end
 
--- True when the cursor sits at the end of a `let` (incl. `let ... else { ... }`)
--- whose required `;` is missing. Tail expressions are never in this set, so
--- `fn f() -> i32 { if c { 1 } else { 2 } }` is left alone.
--- brace_col: 0-based index of the closing `}` in the current line, whether it
--- already exists (auto-pair) or is about to be typed. Defaults to just behind
--- the cursor, which is the Enter case (cursor is after the `}`).
-function M.needs_semicolon(bufnr, brace_col)
+-- `let x = if c { ... }` may still take an `else`, so a `;` decided while
+-- closing its then-block (or a condition inside it) is premature.
+local PREMATURE_TAIL = { if_expression = true }
+
+local function terminates_statement(node, kinds)
+  local parent = node:parent()
+  if not (parent and kinds[parent:type()]) then
+    return false
+  end
+  -- Error recovery can invent a `;` for a half-written statement (e.g.
+  -- `let y = if foo(`), so only trust a cleanly parsed statement.
+  if parent:has_error() then
+    return false
+  end
+  local prev = node:prev_sibling()
+  if prev and PREMATURE_TAIL[prev:type()] then
+    return false
+  end
+  return true
+end
+
+-- True when a `;` at the closing bracket actually terminates an allowlisted
+-- statement. close_col is the 0-based index of the closing bracket on the line,
+-- present (auto-pair) or about to be typed; defaults to just behind the cursor.
+function M.needs_semicolon(bufnr, close_char, close_col)
   local filetype = vim.bo[bufnr].filetype
   local kinds = SEMI_STATEMENTS[filetype]
   if not kinds then
     return false
   end
 
+  close_char = close_char or "}"
   local row, col = unpack(vim.api.nvim_win_get_cursor(0))
-  brace_col = brace_col or (col - 1)
+  close_col = close_col or (col - 1)
 
   local line = vim.api.nvim_get_current_line()
-  local has_brace = line:sub(brace_col + 1, brace_col + 1) == "}"
-  -- The `}` must be (or become) the last non-blank character on the line.
-  if not line:sub(brace_col + (has_brace and 2 or 1)):match("^%s*$") then
+  local has = line:sub(close_col + 1, close_col + 1) == close_char
+  -- The closer must be (or become) the last non-blank character on the line.
+  if not line:sub(close_col + (has and 2 or 1)):match("^%s*$") then
     return false
   end
 
   -- The buffer is syntactically broken by the very `;` we are deciding on, so
   -- error recovery cannot be trusted. Parse a what-if copy instead.
   local new_line
-  if has_brace then
-    new_line = line:sub(1, brace_col + 1) .. ";" .. line:sub(brace_col + 2)
+  if has then
+    new_line = line:sub(1, close_col + 1) .. ";" .. line:sub(close_col + 2)
   else
-    new_line = line:sub(1, brace_col) .. "};" .. line:sub(brace_col + 1)
+    new_line = line:sub(1, close_col) .. close_char .. ";" .. line:sub(close_col + 1)
   end
-  local _, node = whatif_semicolon(bufnr, filetype, row, new_line, brace_col + 1)
+  local node = whatif_semicolon(bufnr, filetype, row, new_line, close_col + 1)
   if not node then
     return false
   end
-  local parent = node:parent()
-  return parent ~= nil and kinds[parent:type()] == true
+  return terminates_statement(node, kinds)
 end
 
--- `let x = if a {} else {}` splits the block, so the `;` belongs after the
--- `else` block, not this one.
-local OPEN_EXCLUDE = { if_expression = true }
-
--- Deciding at open time: the auto-pair is about to insert `{}` where the user
--- typed `{`; say whether the `;` belongs right after that `}`.
-function M.opening_needs_semicolon(bufnr)
+-- Deciding at open time: the auto-pair is about to insert `open_char` +
+-- `close_char`; say whether the `;` belongs right after that closer.
+function M.opening_needs_semicolon(bufnr, open_char, close_char)
   local filetype = vim.bo[bufnr].filetype
   local kinds = SEMI_STATEMENTS[filetype]
   if not kinds then
@@ -264,27 +289,17 @@ function M.opening_needs_semicolon(bufnr)
 
   local row, col = unpack(vim.api.nvim_win_get_cursor(0))
   local line = vim.api.nvim_get_current_line()
-  -- Only when the auto-inserted `}` would land at the end of the line.
+  -- Only when the auto-inserted closer would land at the end of the line.
   if not line:sub(col + 1):match("^%s*$") then
     return false
   end
 
-  local new_line = line:sub(1, col) .. "{};" .. line:sub(col + 1)
-  local root, node = whatif_semicolon(bufnr, filetype, row, new_line, col + 2)
+  local new_line = line:sub(1, col) .. open_char .. close_char .. ";" .. line:sub(col + 1)
+  local node = whatif_semicolon(bufnr, filetype, row, new_line, col + 2)
   if not node then
     return false
   end
-
-  local parent = node:parent()
-  if not (parent and kinds[parent:type()]) then
-    return false
-  end
-
-  local block = root:descendant_for_range(row - 1, col, row - 1, col + 2)
-  if block and block:parent() and OPEN_EXCLUDE[block:parent():type()] then
-    return false
-  end
-  return true
+  return terminates_statement(node, kinds)
 end
 
 function M.handle_cr()
@@ -294,12 +309,13 @@ function M.handle_cr()
   if pairs[char_before] == char_after then
     return cr_expand
   end
-  -- Rust: finishing a `let ... else { ... }` (or any `let`) should place the
-  -- `;` for you. Only when the cursor is at the end of the closing `}`.
+  -- Finishing a statement should place the `;` for you. Only when the cursor is
+  -- at the end of a line whose last non-blank char is a deciding bracket.
   local col = vim.api.nvim_win_get_cursor(0)[2]
   local line = vim.api.nvim_get_current_line()
-  if line:sub(col + 1):match("^%s*$") and line:sub(1, col):match("}%s*$")
-      and M.needs_semicolon(bufnr) then
+  local prev = line:sub(col, col)
+  if SEMI_BRACKETS[prev] and line:sub(col + 1):match("^%s*$")
+      and M.needs_semicolon(bufnr, prev, col - 1) then
     return "<End>;<CR>"
   end
   return "<CR>"
